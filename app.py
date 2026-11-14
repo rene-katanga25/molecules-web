@@ -1,64 +1,12 @@
-"""Site web : temperature d'ebullition + molecule 2D/3D rotative."""
-
 from __future__ import annotations
-
-import html
-import json
 import math
+import streamlit as st
 
-from flask import Flask, request
+st.set_page_config(page_title="Molécules - Température d'ébullition", page_icon="🧪", layout="centered")
 
-app = Flask(__name__)
-
-LT = "\x3c"  # le signe "plus petit que", ecrit de facon protegee
-
-
-def get_boiling_point_celsius(compound: str):
-    """Retourne (temperature_C, message_erreur)."""
-    try:
-        from thermo import Chemical
-        chemical = Chemical(compound)
-    except Exception as exc:
-        print("ERREUR REELLE :", repr(exc))
-        return None, f"Compose introuvable ou non reconnu : {compound!r}."
-
-    try:
-        kelvin = float(chemical.Tb)
-    except (TypeError, ValueError):
-        return None, f"Aucune temperature d'ebullition pour {compound!r}."
-    if not math.isfinite(kelvin):
-        return None, f"Temperature inexploitable pour {compound!r}."
-    return kelvin - 273.15, None
-
-
-PAGE = """\x3c!DOCTYPE html>
-\x3chtml lang="fr">
-\x3chead>
-\x3cmeta charset="UTF-8">
-\x3cmeta name="viewport" content="width=device-width, initial-scale=1">
-\x3ctitle>Molecules - temperature d'ebullition\x3c/title>
-\x3cscript src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.4/3Dmol-min.js">\x3c/script>
-\x3cstyle>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px;
-    font-family: Segoe UI, Arial, sans-serif;
-    background: #0f172a; color: #e2e8f0;
-    display: flex; flex-direction: column; align-items: center;
-  }
-  h1 { margin: 0 0 16px; text-transform: capitalize; }
-  form { margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-  input[type=text] {
-    padding: 10px 14px; font-size: 16px; border-radius: 10px;
-    border: 2px solid #38bdf8; background: #1e293b; color: #e2e8f0;
-    width: 260px;
-  }
-  button {
-    padding: 10px 26px; font-size: 16px; cursor: pointer;
-    border: 2px solid #38bdf8; background: transparent;
-    color: #38bdf8; border-radius: 10px;
-  }
-  button.active { background: #38bdf8; color: #0f172a; font-weight: bold; }
+# --- CSS Personnalisé ---
+st.markdown("""
+<style>
   .temp {
     background: #f97316; color: #fff;
     padding: 14px 28px; border-radius: 14px;
@@ -67,145 +15,142 @@ PAGE = """\x3c!DOCTYPE html>
   .temp .label { font-size: 14px; opacity: 0.9; }
   .temp .value { font-size: 34px; font-weight: bold; }
   .temp .kelvin { font-size: 16px; }
-  .erreur { color: #fbbf24; margin-bottom: 20px; text-align: center; }
-  .buttons { display: flex; gap: 10px; margin-bottom: 16px; }
-  .panel {
-    width: 100%; max-width: 560px; height: 420px;
-    border-radius: 14px; background: #1e293b; position: relative;
-    overflow: hidden;
-  }
-  #viewer { width: 100%; height: 100%; position: relative; }
-  #view2d {
-    display: none; width: 100%; height: 100%;
-    align-items: center; justify-content: center; background: #ffffff;
-  }
-  #view2d img { max-width: 100%; max-height: 100%; }
-  #message { margin-top: 12px; color: #fbbf24; min-height: 20px; text-align: center; }
-  .hint { margin-top: 6px; font-size: 13px; color: #94a3b8; }
-\x3c/style>
-\x3c/head>
-\x3cbody>
-  \x3cform method="get" action="/">
-    \x3cinput type="text" name="compose" value="__COMPOSE__"
-           placeholder="ex : ethanol, acetic acid, H2SO4" autofocus>
-    \x3cbutton type="submit" class="active">Chercher\x3c/button>
-  \x3c/form>
-  __RESULTAT__
-  __SCRIPT__
-\x3c/body>
-\x3c/html>
-"""
+</style>
+""", unsafe_allow_html=True)
 
-SCRIPT_MOLECULE = """
-  const base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/" +
-               encodeURIComponent(NOM);
-  const message = document.getElementById("message");
-  const viewerDiv = document.getElementById("viewer");
-  const view2d = document.getElementById("view2d");
-  const btn3d = document.getElementById("btn3d");
-  const btn2d = document.getElementById("btn2d");
+st.title("🧪 Molécules - Température d'ébullition")
 
-  document.getElementById("img2d").src = base + "/PNG?image_size=500x400";
+# Formulaire de recherche
+with st.form(key="search_form"):
+    compound = st.text_input("Nom du composé (ex : ethanol, acetic acid, H2SO4)", value="")
+    submit_button = st.form_submit_button(label="Chercher")
 
-  const viewer = $3Dmol.createViewer("viewer", { backgroundColor: "#1e293b" });
+def get_boiling_point_celsius(compound_name: str):
+    try:
+        from thermo import Chemical
+        chemical = Chemical(compound_name)
+    except Exception as exc:
+        return None, f"Composé introuvable ou non reconnu : {compound_name!r}."
 
-  async function charger(typeRecord) {
-    const rep = await fetch(base + "/SDF?record_type=" + typeRecord);
-    if (!rep.ok) throw new Error("HTTP " + rep.status);
-    return rep.text();
-  }
+    try:
+        kelvin = float(chemical.Tb)
+    except (TypeError, ValueError):
+        return None, f"Aucune température d'ébullition pour {compound_name!r}."
+    if not math.isfinite(kelvin):
+        return None, f"Température inexploitable pour {compound_name!r}."
+    return kelvin - 273.15, None
 
-  async function afficher3D() {
-    let sdf;
-    try {
-      sdf = await charger("3d");
-    } catch (e) {
-      try {
-        sdf = await charger("2d");
-        message.textContent = "Pas de modele 3D disponible : structure plane affichee.";
-      } catch (e2) {
-        message.textContent = "Molecule introuvable sur PubChem (essayez le nom anglais).";
-        return;
-      }
-    }
-    viewer.addModel(sdf, "sdf");
-    viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.28 } });
-    viewer.zoomTo();
-    viewer.render();
-
-    // Un tour complet autour de Y, puis X, puis Z, et on recommence.
-    const axes = ["y", "x", "z"];
-    let i = 0, angle = 0;
-    setInterval(() => {
-      viewer.rotate(1, axes[i]);
-      viewer.render();
-      angle += 1;
-      if (angle >= 360) { angle = 0; i = (i + 1) % 3; }
-    }, 20);
-
-    if (message.textContent.startsWith("Chargement")) message.textContent = "";
-  }
-
-  function montrer(mode) {
-    const is3d = mode === "3d";
-    viewerDiv.style.display = is3d ? "block" : "none";
-    view2d.style.display = is3d ? "none" : "flex";
-    btn3d.classList.toggle("active", is3d);
-    btn2d.classList.toggle("active", !is3d);
-    if (is3d) { viewer.resize(); viewer.render(); }
-  }
-
-  btn3d.addEventListener("click", () => montrer("3d"));
-  btn2d.addEventListener("click", () => montrer("2d"));
-
-  afficher3D();
-"""
-
-
-def construire_page(compound: str = "", temperature=None, erreur=None) -> str:
-    resultat = ""
-    script = ""
-
+if compound:
+    temperature, erreur = get_boiling_point_celsius(compound.strip())
+    
     if erreur:
-        resultat = f'{LT}div class="erreur">' + html.escape(erreur) + f"{LT}/div>"
+        st.error(erreur)
     elif temperature is not None:
-        resultat = (
-            f"{LT}h1>" + html.escape(compound) + f"{LT}/h1>"
-            f'{LT}div class="temp">'
-            f'{LT}div class="label">Temperature d\'ebullition normale (1 atm){LT}/div>'
-            f'{LT}div class="value">{temperature:.2f} &deg;C{LT}/div>'
-            f'{LT}div class="kelvin">{temperature + 273.15:.2f} K{LT}/div>'
-            f"{LT}/div>"
-            f'{LT}div class="buttons">'
-            f'{LT}button id="btn3d" class="active">3D{LT}/button>'
-            f'{LT}button id="btn2d">2D{LT}/button>'
-            f"{LT}/div>"
-            f'{LT}div class="panel">'
-            f'{LT}div id="viewer">{LT}/div>'
-            f'{LT}div id="view2d">{LT}img id="img2d" alt="Structure 2D">{LT}/div>'
-            f"{LT}/div>"
-            f'{LT}div id="message">Chargement de la molecule...{LT}/div>'
-            f'{LT}div class="hint">3D : clic gauche = tourner, molette = zoom{LT}/div>'
-        )
-        nom_json = json.dumps(compound).replace(LT, "\\u003c")
-        script = f"{LT}script>const NOM = " + nom_json + ";" + SCRIPT_MOLECULE + f"{LT}/script>"
+        st.subheader(compound.capitalize())
+        
+        # Affichage de la température
+        st.markdown(f"""
+        <div class="temp">
+          <div class="label">Température d'ébullition normale (1 atm)</div>
+          <div class="value">{temperature:.2f} °C</div>
+          <div class="kelvin">{temperature + 273.15:.2f} K</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Visualisation 2D / 3D via PubChem & 3Dmol dans Streamlit
+        st.markdown("### Visualisation de la molécule")
+        
+        pubchem_base = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{compound.strip()}"
+        
+        viewer_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.4/3Dmol-min.js"></script>
+          <style>
+            .panel { width: 100%; max-width: 560px; height: 420px; border-radius: 14px; background: #1e293b; position: relative; overflow: hidden; margin: auto; }
+            #viewer { width: 100%; height: 100%; position: relative; }
+            #view2d { display: none; width: 100%; height: 100%; align-items: center; justify-content: center; background: #ffffff; }
+            #view2d img { max-width: 100%; max-height: 100%; }
+            .buttons { display: flex; gap: 10px; margin-bottom: 12px; justify-content: center; }
+            button { padding: 8px 20px; font-size: 14px; cursor: pointer; border: 2px solid #38bdf8; background: transparent; color: #38bdf8; border-radius: 8px; }
+            button.active { background: #38bdf8; color: #0f172a; font-weight: bold; }
+            #message { margin-top: 8px; color: #fbbf24; text-align: center; font-size: 13px; }
+          </style>
+        </head>
+        <body>
+          <div class="buttons">
+            <button id="btn3d" class="active" onclick="montrer('3d')">3D</button>
+            <button id="btn2d" onclick="montrer('2d')">2D</button>
+          </div>
+          <div class="panel">
+            <div id="viewer"></div>
+            <div id="view2d"><img id="img2d" alt="Structure 2D" src="__PUBCHEM_BASE__/PNG?image_size=500x400"></div>
+          </div>
+          <div id="message">Chargement de la molécule...</div>
 
-    return (
-        PAGE
-        .replace("__COMPOSE__", html.escape(compound, quote=True))
-        .replace("__RESULTAT__", resultat)
-        .replace("__SCRIPT__", script)
-    )
+          <script>
+            const base = "__PUBCHEM_BASE__";
+            const message = document.getElementById("message");
+            const viewerDiv = document.getElementById("viewer");
+            const view2d = document.getElementById("view2d");
+            const btn3d = document.getElementById("btn3d");
+            const btn2d = document.getElementById("btn2d");
 
+            const viewer = $3Dmol.createViewer("viewer", { backgroundColor: "#1e293b" });
 
-@app.route("/")
-def accueil():
-    compound = request.args.get("compose", "").strip()
-    if not compound:
-        return construire_page()
-    temperature, erreur = get_boiling_point_celsius(compound)
-    return construire_page(compound, temperature, erreur)
+            async function charger(typeRecord) {
+              const rep = await fetch(base + "/SDF?record_type=" + typeRecord);
+              if (!rep.ok) throw new Error("HTTP " + rep.status);
+              return rep.text();
+            }
 
+            async function afficher3D() {
+              let sdf;
+              try {
+                sdf = await charger("3d");
+              } catch (e) {
+                try {
+                  sdf = await charger("2d");
+                  message.textContent = "Pas de modèle 3D disponible : structure plane affichée.";
+                } catch (e2) {
+                  message.textContent = "Molécule introuvable sur PubChem.";
+                  return;
+                }
+              }
+              viewer.addModel(sdf, "sdf");
+              viewer.setStyle({}, { stick: { radius: 0.15 }, sphere: { scale: 0.28 } });
+              viewer.zoomTo();
+              viewer.render();
 
-if __name__ == "__main__":
-    app.run(debug=True)
+              const axes = ["y", "x", "z"];
+              let i = 0, angle = 0;
+              setInterval(() => {
+                viewer.rotate(1, axes[i]);
+                viewer.render();
+                angle += 1;
+                if (angle >= 360) { angle = 0; i = (i + 1) % 3; }
+              }, 20);
+
+              if (message.textContent.startsWith("Chargement")) message.textContent = "";
+            }
+
+            function montrer(mode) {
+              const is3d = mode === "3d";
+              viewerDiv.style.display = is3d ? "block" : "none";
+              view2d.style.display = is3d ? "none" : "flex";
+              btn3d.classList.toggle("active", is3d);
+              btn2d.classList.toggle("active", !is3d);
+              if (is3d) { viewer.resize(); viewer.render(); }
+            }
+
+            afficher3D();
+          </script>
+        </body>
+        </html>
+        """
+        
+        # Injection propre de l'URL PubChem sans conflit d'accolades
+        viewer_html = viewer_html.replace("__PUBCHEM_BASE__", pubchem_base)
+        
+        st.components.v1.html(viewer_html, height=520)
